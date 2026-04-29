@@ -671,6 +671,7 @@ class EarningsScanner:
             self._driver = None
         
         options = webdriver.ChromeOptions()
+        options.page_load_strategy = 'eager'  # or 'none' for no waiting at all
         options.add_argument("--window-size=1920,1080")
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
@@ -1173,7 +1174,7 @@ class EarningsScanner:
                 post_date, pre_date = self.get_scan_dates(input_date)
             except Exception as e:
                 logger.error(f"Error getting scan dates: {e}")
-                return recommended, near_misses, stock_metrics
+                return recommended, near_misses, stock_metrics, None, None
             
             # Fetch earnings data in parallel with timeout and error handling
             post_stocks = []
@@ -1203,7 +1204,7 @@ class EarningsScanner:
                 pre_stocks = []
         except Exception as e:
             logger.error(f"Error adjusting thresholds or fetching earnings data: {e}")
-            return recommended, near_misses, stock_metrics
+            return recommended, near_misses, stock_metrics, None, None
             
         # Initialize candidates list properly - outside of the try block
         candidates = []
@@ -1212,9 +1213,11 @@ class EarningsScanner:
                      [s for s in pre_stocks if s['timing'] == 'Pre Market']
         
         logger.info(f"Found {len(candidates)} initial candidates")
+        logger.info(f"Candidates = {sorted([t['ticker'] for t in candidates])}")
         
         recommended = []
         near_misses = []
+        skips = []
         stock_metrics = {}
         
         # Process in parallel if workers specified
@@ -1241,6 +1244,8 @@ class EarningsScanner:
                             elif result['near_miss']:
                                 near_misses.append((ticker, result['reason']))
                                 stock_metrics[ticker] = result['metrics']
+                            else:
+                                skips.append((ticker, result['reason']))
                         except Exception as e:
                             logger.error(f"Error processing {ticker}: {e}")
                         finally:
@@ -1262,9 +1267,14 @@ class EarningsScanner:
                         elif result['near_miss']:
                             near_misses.append((ticker, result['reason']))
                             stock_metrics[ticker] = result['metrics']
+                        else:
+                            skips.append((ticker, result['reason']))
+
                         pbar.update(1)
                     
                     if batch != batches[-1]:
                         time.sleep(5)  # Reduced sleep time
-        
-        return recommended, near_misses, stock_metrics
+
+        tickers = sorted([s['ticker'] for s in candidates])
+
+        return recommended, near_misses, stock_metrics, skips, tickers

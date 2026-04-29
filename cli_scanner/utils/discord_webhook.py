@@ -1,28 +1,42 @@
 import requests
 import logging
-from typing import Dict, Any, Union
+from typing import List
+
+DISCORD_MAX_LEN = 2000
 
 
-def send_webhook(webhook_url: str, message: Union[str, Dict[str, Any]], logger: logging.Logger) -> None:
-    """
-    Send a message or embed to a Discord webhook, preserving original formatting.
+def _chunk(content: str) -> List[str]:
+    if len(content) <= DISCORD_MAX_LEN:
+        return [content]
+    chunks, current = [], []
+    current_len = 0
+    for line in content.splitlines(keepends=True):
+        # If a single line exceeds the limit, hard-split it
+        while len(line) > DISCORD_MAX_LEN:
+            remaining = DISCORD_MAX_LEN - current_len
+            current.append(line[:remaining])
+            chunks.append("".join(current))
+            current, current_len = [], 0
+            line = line[remaining:]
+        if current_len + len(line) > DISCORD_MAX_LEN:
+            chunks.append("".join(current))
+            current, current_len = [], 0
+        current.append(line)
+        current_len += len(line)
+    if current:
+        chunks.append("".join(current))
+    return chunks
 
-    :param webhook_url: The Discord webhook URL.
-    :param message: Either a plain string (sent as a code block) or a dict representing a Discord embed.
-    :param logger: Logger for error reporting.
-    """
+
+def send_webhook(webhooks_url: str, messages: List[str], logger: logging.Logger) -> None:
+    """Post each message in `messages` as a separate Discord webhook request."""
     headers = {"Content-Type": "application/json"}
-    try:
-        if isinstance(message, str):
-            # Wrap the message in a code block to preserve formatting
-            payload = {"content": f"```\n{message}\n```"}
-            response = requests.post(webhook_url, json=payload, headers=headers, timeout=10)
-        else:
-            # Send rich embed as-is
-            payload = {"embeds": [message]}
-            response = requests.post(webhook_url, json=payload, headers=headers, timeout=10)
-
-        if response.status_code >= 400:
-            logger.error(f"Webhook request failed ({response.status_code}): {response.text}")
-    except Exception as e:
-        logger.error(f"Error sending webhook: {e}")
+    for hook in (h.strip() for h in webhooks_url.split(",")):
+        for content in messages:
+            for chunk in _chunk(content):
+                try:
+                    response = requests.post(hook, json={"content": chunk}, headers=headers, timeout=10)
+                    if response.status_code >= 400:
+                        logger.error(f"Webhook request failed ({response.status_code}): {response.text}")
+                except Exception as e:
+                    logger.error(f"Error sending webhook: {e}")

@@ -168,7 +168,7 @@ def main():
     try:
         running = True
         while running:
-            recommended, near_misses, stock_metrics = scanner.scan_earnings(
+            recommended, near_misses, stock_metrics, skips, scanned_tickers = scanner.scan_earnings(
                 input_date=input_date,
                 workers=args.parallel,
                 use_finnhub=args.use_finnhub,
@@ -176,8 +176,10 @@ def main():
                 all_sources=args.all_sources
             )
 
-            if recommended or near_misses:
-                print('\n=== SCAN RESULTS ===')
+            postDate, preDate = scanner.get_scan_dates(input_date)
+
+            if recommended or near_misses or skips:
+                print(f'\n=== SCAN RESULTS {postDate} ===')
                 tier1 = [t for t in recommended
                          if stock_metrics[t].get('tier') == 1]
                 tier2 = [t for t in recommended
@@ -277,94 +279,83 @@ def main():
                     else:
                         print('  None')
 
+                    print('\nSKIPPING:')
+                    if skips:
+                        for tick, reason in skips:
+                            print(f'\n  {tick}:')
+                            print(f'    Failed: {reason}')
+                    else:
+                        print('  None')
+
+
                 if args.webhook:
-                    # build a list of Embed fields
-                    fields = []
+                    def fmt_stock(tick, m):
+                        lines = [
+                            f"**{tick}**",
+                            f"• Price: ${m['price']:.2f}",
+                            f"• Volume: {m['volume']:,.0f}",
+                            f"• Winrate: {m['win_rate']:.1f}% over last {m['win_quarters']} earnings",
+                            f"• IV/RV Ratio: {m['iv_rv_ratio']:.2f}",
+                            f"• Term Structure: {m['term_structure']:.3f}",
+                        ]
+                        if args.iron_fly:
+                            fly = scanner.calculate_iron_fly_strikes(tick)
+                            if 'error' not in fly:
+                                lines += [
+                                    "**Iron Fly:**",
+                                    f"  Expiration: {fly['expiration']}",
+                                    f"  Short: ${fly['short_put_strike']}P / ${fly['short_call_strike']}C for ${fly['total_credit']} credit",
+                                    f"  Long: ${fly['long_put_strike']}P / ${fly['long_call_strike']}C for ${fly['total_debit']} debit",
+                                    f"  Break-evens: {fly['lower_breakeven']} – {fly['upper_breakeven']}, Risk/Reward: 1:{fly['risk_reward_ratio']}",
+                                ]
+                        return "\n".join(lines)
 
-                    # Tier 1 details
+                    # Message 1: scanned companies
+                    msg1 = f"# SCAN RESULTS {postDate}\n" + ("" if scanned_tickers else "None")
+
+                    # Message 2: Tier 1
                     if tier1:
-                        for tick in tier1:
-                            m = stock_metrics[tick]
-                            name = f"Tier 1 — {tick}"
-                            value_lines = [
-                                f"• Price: `${m['price']:.2f}`",
-                                f"• Volume: `{m['volume']:,.0f}`",
-                                f"• Winrate: `{m['win_rate']:.1f}%` over last `{m['win_quarters']}` earnings",
-                                f"• IV/RV Ratio: `{m['iv_rv_ratio']:.2f}`",
-                                f"• Term Structure: `{m['term_structure']:.3f}`",
-                                f"• Tier: `{m.get('tier')}`"
-                            ]
-                            # iron fly
-                            if args.iron_fly:
-                                fly = scanner.calculate_iron_fly_strikes(tick)
-                                if 'error' not in fly:
-                                    value_lines.extend([
-                                        "",
-                                        "**Iron Fly**:",
-                                        f"▫️ Expiration: `{fly['expiration']}`",
-                                        f"▫️ Short: `{fly['short_put_strike']}P / {fly['short_call_strike']}C` for `{fly['total_credit']}` credit",
-                                        f"▫️ Long: `{fly['long_put_strike']}P / {fly['long_call_strike']}C` for `{fly['total_debit']}` debit",
-                                        f"▫️ Break-evens: `{fly['lower_breakeven']} – {fly['upper_breakeven']}`",
-                                        f"▫️ Risk/Reward: `1:{fly['risk_reward_ratio']}`"
-                                    ])
-                            fields.append({'name': name, 'value': "\n".join(value_lines), 'inline': False})
+                        msg2 = "## Tier 1 Recommended Trades:\n\n" + "\n\n".join(fmt_stock(t, stock_metrics[t]) for t in tier1)
+                    else:
+                        msg2 = "## Tier 1 Recommended Trades:\nNone"
 
-                    # Tier 2 details
+                    # Message 3: Tier 2
                     if tier2:
-                        for tick in tier2:
-                            m = stock_metrics[tick]
-                            name = f"Tier 2 — {tick}"
-                            value_lines = [
-                                f"• Price: `${m['price']:.2f}`",
-                                f"• Volume: `{m['volume']:,.0f}`",
-                                f"• Winrate: `{m['win_rate']:.1f}%` over last `{m['win_quarters']}` earnings",
-                                f"• IV/RV Ratio: `{m['iv_rv_ratio']:.2f}`",
-                                f"• Term Structure: `{m['term_structure']:.3f}`",
-                                f"• Tier: `{m.get('tier')}`"
-                            ]
-                            if args.iron_fly:
-                                fly = scanner.calculate_iron_fly_strikes(tick)
-                                if 'error' not in fly:
-                                    value_lines.extend([
-                                        "",
-                                        "**Iron Fly**:",
-                                        f"▫️ Expiration: `{fly['expiration']}`",
-                                        f"▫️ Short: `{fly['short_put_strike']}P / {fly['short_call_strike']}C` for `{fly['total_credit']}` credit",
-                                        f"▫️ Long: `{fly['long_put_strike']}P / {fly['long_call_strike']}C` for `{fly['total_debit']}` debit",
-                                        f"▫️ Break-evens: `{fly['lower_breakeven']} – {fly['upper_breakeven']}`",
-                                        f"▫️ Risk/Reward: `1:{fly['risk_reward_ratio']}`"
-                                    ])
-                            fields.append({'name': name, 'value': "\n".join(value_lines), 'inline': False})
+                        msg3 = "## Tier 2 Recommended Trades:\n\n" + "\n\n".join(fmt_stock(t, stock_metrics[t]) for t in tier2)
+                    else:
+                        msg3 = "## Tier 2 Recommended Trades:\nNone"
 
-                    # Near misses
+                    # Message 4: Near Misses
                     if near_misses:
+                        nm_parts = []
                         for tick, reason in near_misses:
                             m = stock_metrics[tick]
-                            name = f"Near Miss — {tick}"
-                            value = (
-                                f"• Failed: `{reason}`\n"
-                                f"• Price: `${m['price']:.2f}`\n"
-                                f"• Volume: `{m['volume']:,.0f}`\n"
-                                f"• Winrate: `{m['win_rate']:.1f}%` over last `{m['win_quarters']}` earnings\n"
-                                f"• IV/RV Ratio: `{m['iv_rv_ratio']:.2f}`\n"
-                                f"• Term Structure: `{m['term_structure']:.3f}`"
+                            nm_parts.append(
+                                f"**{tick}**\n"
+                                f"• Failed: {reason}\n"
+                                f"• Price: ${m['price']:.2f}\n"
+                                f"• Volume: {m['volume']:,.0f}\n"
+                                f"• Winrate: {m['win_rate']:.1f}% over last {m['win_quarters']} earnings\n"
+                                f"• IV/RV Ratio: {m['iv_rv_ratio']:.2f}\n"
+                                f"• Term Structure: {m['term_structure']:.3f}"
                             )
-                            fields.append({'name': name, 'value': value, 'inline': False})
+                        msg4 = "## Near Misses:\n\n" + "\n\n".join(nm_parts)
+                    else:
+                        msg4 = "## Near Misses:\nNone"
 
-                    # fallback if nothing to show
-                    if not fields:
-                        fields.append({'name': 'No recommendations', 'value': 'None found', 'inline': False})
+                    # Message 5: Skips
+                    if skips:
+                        skip_parts = sorted([f"**{tick}**: {reason}" for tick, reason in skips])
+                        msg5 = "## Skips:\n" + "\n".join(skip_parts)
+                    else:
+                        msg5 = "## Skips:\nNone"
 
-                    embed = {
-                        'title': 'Earnings Scanner Results',
-                        'color': 3066993,
-                        'fields': fields,
-                        'timestamp': datetime.now(timezone.utc).isoformat()
-                    }
-                    send_webhook(args.webhook, embed, logger)
+                    send_webhook(args.webhook, [msg1, msg2, msg3, msg4], logger)
             
             else:
                 logger.info('No recommended stocks found')
+                if args.webhook:
+                    send_webhook(args.webhook, ['No earnings found.'], logger)
 
             if args.forever and args.forever > 0:
                 logger.info(f'Sleeping for {args.forever} hours...')

@@ -59,14 +59,14 @@ done
 # Handle analyze mode specifically
 if [[ ! -z "$ANALYZE_TICKER" ]]; then
   echo "Analyzing ticker: $ANALYZE_TICKER"
-  python3 scanner.py $ANALYZE_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
+  venv/bin/python scanner.py $ANALYZE_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
   exit 0
 fi
 
 # Run the scanner with parallel processing
 if [ -z "$1" ]; then
   # No arguments - Run with current date
-  python3 scanner.py --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
+  venv/bin/python scanner.py --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
 elif [[ "$1" == "-l" || "$1" == "--list" || "$1" == "-i" || "$1" == "--iron-fly" || "$1" == "-f" || "$1" == "--use-finnhub" || "$1" == "-u" || "$1" == "--use-dolthub" || "$1" == "-c" || "$1" == "--all-sources" ]]; then
   # Handle flags when they appear as the first argument
   if [[ "$1" == "-l" || "$1" == "--list" ]]; then
@@ -96,8 +96,8 @@ elif [[ "$1" == "-l" || "$1" == "--list" || "$1" == "-i" || "$1" == "--iron-fly"
     fi
   done
   
-  python3 scanner.py --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
+  venv/bin/python scanner.py --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
 else
   # Date is provided as first argument
-  python3 scanner.py --date "$1" --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
+  venv/bin/python scanner.py --date "$1" --parallel $WORKERS $LIST_FLAG $IRONFLY_FLAG $FINNHUB_FLAG $DOLTHUB_FLAG $COMBINED_FLAG
 fi
