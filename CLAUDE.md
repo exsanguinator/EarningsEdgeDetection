@@ -69,7 +69,7 @@ The codebase has three layers:
 
 Workflow (`.github/workflows/earnings_edge.yaml`) runs at 9:57 AM ET weekdays, installs deps, and calls `run_discord.sh`. Secrets needed: `DISCORD_WEBHOOK_URL`, `FINNHUB_API_KEY`.
 
-> **Keepalive**: GitHub auto-disables scheduled workflows after 60 days of repository inactivity. Commit something to the repo at least every 60 days to keep the daily scan running.
+> **Keepalive**: GitHub auto-disables scheduled workflows after 60 days of repository inactivity. `keep-alive.sh` automates this — run it manually or on a schedule to commit a timestamp bump and keep the workflow active. Commit something to the repo at least every 60 days to keep the daily scan running.
 
 ## Logs
 
