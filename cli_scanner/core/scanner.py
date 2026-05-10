@@ -104,8 +104,9 @@ class EarningsScanner:
             # Calculate total credit
             total_credit = short_call_premium + short_put_premium
             
-            # Calculate wing width - 3x the credit received
-            wing_width = 3 * total_credit
+            # Calculate wing width - 1x the credit received
+            # Calculate to expected move
+            wing_width = 1 * total_credit
             
             # Calculate wing strikes
             long_put_strike = short_put_strike - wing_width
