@@ -814,6 +814,12 @@ class EarningsScanner:
                     'metrics': {'price': current_price}
                 }
 
+            # pull market cap
+            try:
+                metrics['market_cap'] = yf_ticker.fast_info.market_cap
+            except Exception:
+                metrics['market_cap'] = None
+
             # Options availability and expiration check
             options_dates = yf_ticker.options
             if not options_dates:

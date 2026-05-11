@@ -202,6 +202,7 @@ def main():
                                   f'over the last {m["win_quarters"]} earnings')
                             print(f'    IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
+                            print(f'    Market Cap: {m["market_cap"]:,.0f}')
                             if args.iron_fly:
                                 fly = scanner.calculate_iron_fly_strikes(tick)
                                 if 'error' not in fly:
@@ -238,6 +239,7 @@ def main():
                                   f'over the last {m["win_quarters"]} earnings')
                             print(f'    IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
+                            print(f'    Market Cap: {m["market_cap"]:,.0f}')
                             if args.iron_fly:
                                 fly = scanner.calculate_iron_fly_strikes(tick)
                                 if 'error' not in fly:
@@ -276,6 +278,7 @@ def main():
                                   f'over the last {m["win_quarters"]} earnings')
                             print(f'      IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'      Term Structure: {m["term_structure"]:.3f}')
+                            print(f'      Market Cap: {m["market_cap"]:,.0f}')
                     else:
                         print('  None')
 
@@ -297,6 +300,7 @@ def main():
                             f"• Winrate: {m['win_rate']:.1f}% over last {m['win_quarters']} earnings",
                             f"• IV/RV Ratio: {m['iv_rv_ratio']:.2f}",
                             f"• Term Structure: {m['term_structure']:.3f}",
+                            f"• Market Cap: {m["market_cap"]:,.0f}",
                         ]
                         if args.iron_fly:
                             fly = scanner.calculate_iron_fly_strikes(tick)
