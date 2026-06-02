@@ -2,7 +2,7 @@ name: Earnings Edge Detection
 
 on:
   schedule:
-    - cron: '57 9 * * 1-5'
+    - cron: '28 9 * * 1-5'
       timezone: "America/New_York"
   workflow_dispatch:
 
