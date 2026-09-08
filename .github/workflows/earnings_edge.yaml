@@ -1,9 +1,6 @@
 name: Earnings Edge Detection
 
 on:
-  schedule:
-    - cron: '33 11 * * 1-5'
-      timezone: "America/New_York"
   workflow_dispatch:
 
 jobs:
