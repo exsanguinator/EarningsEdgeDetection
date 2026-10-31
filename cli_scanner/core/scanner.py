@@ -6,10 +6,12 @@ import logging
 import os
 import re
 import time
+import warnings
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor
 
+import pandas as pd
 import pytz
 import requests
 from curl_cffi import requests as curl_requests
@@ -26,6 +28,11 @@ import core.yfinance_cookie_patch
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# yfinance (through at least 1.7.0) still uses inplace=True, which pandas 3.1
+# deprecated. Silence those warnings for yfinance only; our own code still warns.
+if hasattr(pd.errors, "Pandas4Warning"):
+    warnings.filterwarnings("ignore", category=pd.errors.Pandas4Warning, module=r"yfinance(\.|$)")
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 logger.addHandler(handler)
