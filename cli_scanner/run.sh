@@ -9,6 +9,13 @@
 #   ./run.sh -a TICKER           - Analyze a specific ticker
 #   ./run.sh -a TICKER -i        - Analyze ticker with iron fly strategy
 
+# Load credentials (MC_USERNAME, MC_PASSWORD, FINNHUB_API_KEY, ...) from .env if present
+if [ -f "$(dirname "$0")/.env" ]; then
+  set -a
+  source "$(dirname "$0")/.env"
+  set +a
+fi
+
 # Make sure dependencies are installed (pip install -r requirements.txt)
 
 # Get number of available cores for parallel processing

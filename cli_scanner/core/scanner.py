@@ -3,6 +3,7 @@ Earnings scanner that handles date logic and filtering.
 """
 
 import logging
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -703,7 +704,49 @@ class EarningsScanner:
         service = Service(ChromeDriverManager().install())
         self._driver = webdriver.Chrome(service=service, options=options)
         self._driver.set_page_load_timeout(10)  # Even shorter timeout
-        
+        self._login_mc()
+
+    _MC_LOGIN_URL = "https://marketchameleon.com/Account/Login"
+
+    @staticmethod
+    def _mc_login_wall_shown(driver) -> bool:
+        """True if the current page is MC's members-only interstitial or the login form."""
+        if "/Account/Login" in driver.current_url:
+            return True
+        return bool(driver.find_elements(By.XPATH, "//h1[contains(., 'Sign in to view this page')]"))
+
+    def _login_mc(self):
+        """Sign into Market Chameleon using MC_USERNAME / MC_PASSWORD env vars.
+
+        The earnings pages require a (free) account. Raises if credentials are
+        missing or rejected, so callers fail fast instead of timing out.
+        """
+        username = os.environ.get('MC_USERNAME')
+        password = os.environ.get('MC_PASSWORD')
+        if not username or not password:
+            raise RuntimeError(
+                "MC_USERNAME and MC_PASSWORD must be set; Market Chameleon earnings pages require a login"
+            )
+
+        self._driver.get(self._MC_LOGIN_URL)
+        wait = WebDriverWait(self._driver, 10)
+        form = wait.until(EC.presence_of_element_located(
+            (By.XPATH, "//form[.//input[@name='Password']]")
+        ))
+        form.find_element(By.NAME, "UserName").send_keys(username)
+        form.find_element(By.NAME, "Password").send_keys(password)
+        form.find_element(By.CSS_SELECTOR, "button[type='submit']").click()
+
+        # Successful login redirects away from /Account/Login
+        try:
+            wait.until(lambda d: "/Account/Login" not in d.current_url)
+        except Exception:
+            errors = [e.text.strip() for e in self._driver.find_elements(
+                By.CSS_SELECTOR, ".validation-summary-errors, .field-validation-error, .text-danger"
+            ) if e.text.strip()]
+            raise RuntimeError(f"Market Chameleon login failed: {'; '.join(errors) or 'still on login page'}")
+        logger.info("Logged into Market Chameleon")
+
     def check_mc_overestimate(self, ticker: str) -> Dict[str, any]:
         """Get Market Chameleon overestimate data with retry mechanism"""
         import threading
@@ -740,7 +783,15 @@ class EarningsScanner:
                     
                     url = f"https://marketchameleon.com/Overview/{ticker}/Earnings/Earnings-Charts/"
                     self._driver.get(url)
-                    
+
+                    # Session expired or never logged in: sign in and reload
+                    if self._mc_login_wall_shown(self._driver):
+                        logger.info(f"Market Chameleon login required for {ticker}, signing in")
+                        self._login_mc()
+                        self._driver.get(url)
+                        if self._mc_login_wall_shown(self._driver):
+                            raise RuntimeError("still blocked by Market Chameleon login wall after signing in")
+
                     wait = WebDriverWait(self._driver, 8)  # Even shorter timeout
                     section = wait.until(
                         EC.presence_of_element_located((By.CLASS_NAME, "symbol-section-header-descr"))
