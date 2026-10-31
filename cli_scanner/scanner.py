@@ -177,9 +177,11 @@ def main():
             )
 
             postDate, preDate = scanner.get_scan_dates(input_date)
+            candidates_line = f'Candidates = {scanned_tickers}'
 
             if recommended or near_misses or skips:
                 print(f'\n=== SCAN RESULTS {postDate} ===')
+                print(candidates_line)
                 tier1 = [t for t in recommended
                          if stock_metrics[t].get('tier') == 1]
                 tier2 = [t for t in recommended
@@ -315,7 +317,7 @@ def main():
                         return "\n".join(lines)
 
                     # Message 1: scanned companies
-                    msg1 = f"# SCAN RESULTS {postDate}\n" + ("" if scanned_tickers else "None")
+                    msg1 = f"# SCAN RESULTS {postDate}\n{candidates_line}"
 
                     # Message 2: Tier 1
                     if tier1:
@@ -357,9 +359,23 @@ def main():
                     send_webhook(args.webhook, [msg1, msg2, msg3, msg4], logger)
             
             else:
-                logger.info('No recommended stocks found')
+                # Tell apart "no earnings", "scan failed", and "candidates found
+                # but every one errored during analysis" (issue #1)
+                if scanned_tickers is None:
+                    status = 'Scan failed before any tickers were analyzed (see logs).'
+                elif not scanned_tickers:
+                    status = 'No earnings found.'
+                else:
+                    status = (f'{len(scanned_tickers)} candidates found, but none could be '
+                              'analyzed (see logs).')
+                print(f'\n=== SCAN RESULTS {postDate} ===')
+                print(candidates_line)
+                print(status)
+                logger.info(status)
                 if args.webhook:
-                    send_webhook(args.webhook, ['No earnings found.'], logger)
+                    send_webhook(args.webhook,
+                                 [f'# SCAN RESULTS {postDate}\n{candidates_line}\n{status}'],
+                                 logger)
 
             if args.forever and args.forever > 0:
                 logger.info(f'Sleeping for {args.forever} hours...')
