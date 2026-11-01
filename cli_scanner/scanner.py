@@ -14,6 +14,13 @@ from utils.logging_utils import setup_logging
 from core.scanner import EarningsScanner
 from utils.discord_webhook import send_webhook
 
+
+def winrate_text(m):
+    """Win rate for display; None means the fetch failed or was not run."""
+    if m.get('win_rate') is None:
+        return 'unavailable'
+    return f"{m['win_rate']:.1f}% over the last {m['win_quarters']} earnings"
+
 def main():
     parser = argparse.ArgumentParser(
         description="""
@@ -128,8 +135,7 @@ def main():
         if 'iv_rv_ratio' in metrics:
             print(f"  IV/RV Ratio: {metrics['iv_rv_ratio']:.2f}")
         if 'win_rate' in metrics and 'win_quarters' in metrics:
-            print(f'  Winrate: {metrics["win_rate"]:.1f}% over the last '
-                  f'{metrics["win_quarters"]} earnings')
+            print(f'  Winrate: {winrate_text(metrics)}')
 
         extras = {
             k: v for k, v in metrics.items()
@@ -179,6 +185,13 @@ def main():
 
             postDate, preDate = scanner.get_scan_dates(input_date)
             candidates_line = f'Candidates = {scanned_tickers}'
+            # Flag a day when the win-rate fetch was down, rather than every
+            # name quietly failing for the same reason
+            winrate_down = [t for t, reason in (near_misses or []) + (skips or [])
+                            if 'Winrate unavailable' in reason]
+            if winrate_down:
+                candidates_line += (f'\nWinrate unavailable for {len(winrate_down)} '
+                                    f'names: {sorted(winrate_down)}')
 
             if recommended or near_misses or skips:
                 print(f'\n=== SCAN RESULTS {postDate} ===')
@@ -201,8 +214,7 @@ def main():
                             print(f'\n  {tick}:')
                             print(f'    Price: ${m["price"]:.2f}')
                             print(f'    Volume: {m["volume"]:,.0f}')
-                            print(f'    Winrate: {m["win_rate"]:.1f}% '
-                                  f'over the last {m["win_quarters"]} earnings')
+                            print(f'    Winrate: {winrate_text(m)}')
                             print(f'    IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
                             print(f'    Market Cap: {m["market_cap"]:,.0f}')
@@ -239,8 +251,7 @@ def main():
                             print(f'\n  {tick}:')
                             print(f'    Price: ${m["price"]:.2f}')
                             print(f'    Volume: {m["volume"]:,.0f}')
-                            print(f'    Winrate: {m["win_rate"]:.1f}% '
-                                  f'over the last {m["win_quarters"]} earnings')
+                            print(f'    Winrate: {winrate_text(m)}')
                             print(f'    IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
                             print(f'    Market Cap: {m["market_cap"]:,.0f}')
@@ -279,8 +290,7 @@ def main():
                             print('    Metrics:')
                             print(f'      Price: ${m["price"]:.2f}')
                             print(f'      Volume: {m["volume"]:,.0f}')
-                            print(f'      Winrate: {m["win_rate"]:.1f}% '
-                                  f'over the last {m["win_quarters"]} earnings')
+                            print(f'      Winrate: {winrate_text(m)}')
                             print(f'      IV/RV Ratio: {m["iv_rv_ratio"]:.2f}')
                             print(f'      Term Structure: {m["term_structure"]:.3f}')
                             print(f'      Market Cap: {m["market_cap"]:,.0f}')
@@ -302,7 +312,7 @@ def main():
                             f"**{tick}**",
                             f"• Price: ${m['price']:.2f}",
                             f"• Volume: {m['volume']:,.0f}",
-                            f"• Winrate: {m['win_rate']:.1f}% over last {m['win_quarters']} earnings",
+                            f"• Winrate: {winrate_text(m)}",
                             f"• IV/RV Ratio: {m['iv_rv_ratio']:.2f}",
                             f"• Term Structure: {m['term_structure']:.3f}",
                             f"• Market Cap: {m['market_cap']:,.0f}",
@@ -345,7 +355,7 @@ def main():
                                 f"• Failed: {reason}\n"
                                 f"• Price: ${m['price']:.2f}\n"
                                 f"• Volume: {m['volume']:,.0f}\n"
-                                f"• Winrate: {m['win_rate']:.1f}% over last {m['win_quarters']} earnings\n"
+                                f"• Winrate: {winrate_text(m)}\n"
                                 f"• IV/RV Ratio: {m['iv_rv_ratio']:.2f}\n"
                                 f"• Term Structure: {m['term_structure']:.3f}"
                             )

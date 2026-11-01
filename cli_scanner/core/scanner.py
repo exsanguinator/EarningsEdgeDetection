@@ -771,8 +771,8 @@ class EarningsScanner:
         if self._driver_lock is None:
             self._driver_lock = threading.Lock()
         
-        # Default return values
-        default_result = {'win_rate': 0.0, 'quarters': 0}
+        # Returned when the fetch fails: None means unavailable, not 0%
+        default_result = {'win_rate': None, 'quarters': 0}
         
         # Acquire lock for thread safety
         with self._driver_lock:
@@ -813,8 +813,8 @@ class EarningsScanner:
                         EC.presence_of_element_located((By.CLASS_NAME, "symbol-section-header-descr"))
                     )
             
-                    # Default results
-                    win_rate = 0.0
+                    # Stays None (unavailable) if the page has no win-rate line
+                    win_rate = None
                     quarters = 0
                     
                     # Extract both the percentage and quarters data
@@ -1073,15 +1073,19 @@ class EarningsScanner:
                 metrics['win_rate'] = win_rate
                 metrics['win_quarters'] = quarters
                 
+                # A fetch that failed is reported as such rather than scored as 0%.
+                # It still counts as a failed check.
+                if win_rate is None:
+                    failed_checks.append("Winrate unavailable")
                 # Apply the new threshold of 50%
-                if win_rate < 50.0:
+                elif win_rate < 50.0:
                     if win_rate >= 40.0:  # Between 40-50% is now a near miss
                         near_miss_checks.append(f"Winrate {win_rate}% < 50% (over {quarters} earnings)")
                     else:  # Below 40% is still a failure
                         failed_checks.append(f"Winrate {win_rate}% < 40% (over {quarters} earnings)")
             else:
-                # Add placeholders if we skip
-                metrics['win_rate'] = 0.0
+                # Not checked
+                metrics['win_rate'] = None
                 metrics['win_quarters'] = 0
             
             # IV/RV check

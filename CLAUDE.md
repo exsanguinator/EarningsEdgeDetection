@@ -38,7 +38,7 @@ bash run_discord.sh
 
 Env vars go in `cli_scanner/.env` (gitignored); both `run.sh` and `run_discord.sh` source it.
 
-- **Required**: `MC_USERNAME`, `MC_PASSWORD` — a free Market Chameleon account. MC's earnings pages are behind a login wall; without credentials every ticker gets a 0% win rate and fails the winrate check.
+- **Required**: `MC_USERNAME`, `MC_PASSWORD` — a free Market Chameleon account. MC's earnings pages are behind a login wall; without credentials every ticker's win rate is unavailable and fails the winrate check.
 - **Optional**: `FINNHUB_API_KEY` (for Finnhub source), `DISCORD_WEBHOOK_URL`.
 
 ## Architecture
@@ -52,7 +52,7 @@ The codebase has three layers:
 - `fetch_earnings_data()`: Selects data source based on flags. Default: Investing.com with Finnhub fallback. `-u`: DoltHub + Finnhub. `-c`: all three merged (DoltHub preferred for timing).
 - `validate_stock()`: Ordered filter chain — price → options/expiry → open interest → core analysis → term structure (hard exit at > -0.004) → ATM delta → expected move → volume → Market Chameleon winrate → IV/RV. Returns tier 1/2/near-miss/skip.
 - `adjust_thresholds_based_on_spy()`: Dynamically relaxes IV/RV thresholds when SPY IV/RV is low (four tiers down to 0.75).
-- `check_mc_overestimate()`: Selenium scrape of Market Chameleon; single shared browser instance with thread lock and retry. `_initialize_browser()` logs in via `_login_mc()`; if a page shows the "Sign in to view this page" wall (expired session), it re-logs in and reloads once. On failure it returns `win_rate=0.0`, which counts as a failed check rather than a skip. A bare `Message:` + chromedriver stacktrace in logs is a Selenium `TimeoutException` — usually the login wall or a changed page layout, not a driver problem.
+- `check_mc_overestimate()`: Selenium scrape of Market Chameleon; single shared browser instance with thread lock and retry. `_initialize_browser()` logs in via `_login_mc()`; if a page shows the "Sign in to view this page" wall (expired session), it re-logs in and reloads once. On failure it returns `win_rate=None`, reported as `Winrate unavailable`; it still counts as a failed check, and the scan summary lists the names it hit. A bare `Message:` + chromedriver stacktrace in logs is a Selenium `TimeoutException` — usually the login wall or a changed page layout, not a driver problem.
 - `scan_earnings()`: Orchestrates parallel or batched processing. Parallel mode caps at 8 workers.
 
 **Analyzer layer** (`core/analyzer.py`, `OptionsAnalyzer`):

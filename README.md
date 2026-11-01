@@ -116,7 +116,8 @@ Optional parameters:
 3. Winrate (previously Market Chameleon Overestimate)
    - Pass: >= 50%
    - Near Miss: 40-49.9%
-   - Fail: < 40%
+   - Fail: < 40%, or "unavailable" when the win-rate fetch fails (the scan
+     summary lists the names this happened to)
 
 4. IV/RV Ratio
    - Pass: ≥ 1.25
