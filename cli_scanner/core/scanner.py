@@ -24,6 +24,7 @@ import yfinance as yf
 from tqdm import tqdm
 
 from .analyzer import OptionsAnalyzer
+from .market_calendar import eastern_today, next_trading_day
 import core.yfinance_cookie_patch
 
 logger = logging.getLogger(__name__)
@@ -202,13 +203,8 @@ class EarningsScanner:
             market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
             post_date = now.date() if now < market_close else (now + timedelta(days=1)).date()
 
-        # Determine pre_date
-        if post_date.weekday() == 4:  # Friday (0=Mon, 4=Fri)
-            pre_date = post_date + timedelta(days=3)  # Next Monday
-        elif post_date.weekday() == 5:  # Saturday
-            pre_date = post_date + timedelta(days=2)  # Next Monday
-        else:
-            pre_date = post_date + timedelta(days=1)
+        # Pre-market reports react on the next trading day (skips weekends and NYSE holidays)
+        pre_date = next_trading_day(post_date)
 
         logger.info(f"Computed scan dates: post-market {post_date}, pre-market {pre_date}")
         return post_date, pre_date
@@ -890,7 +886,7 @@ class EarningsScanner:
 
             # Check expiration date
             first_expiry = datetime.strptime(options_dates[0], "%Y-%m-%d").date()
-            days_to_expiry = (first_expiry - datetime.now().date()).days
+            days_to_expiry = (first_expiry - eastern_today()).days
             if days_to_expiry > 9:
                 return {
                     'pass': False,

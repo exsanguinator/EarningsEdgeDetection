@@ -158,6 +158,10 @@ With the `--iron-fly` flag, additional trade specifics are provided.
   - Checks tomorrow's post-market earnings
   - Checks the following day's pre-market earnings
 
+ "Following day" means the next trading day, skipping weekends and NYSE holidays.
+ All dates, including days to expiry, use Eastern time whatever the machine's
+ timezone.
+
  A report with no timing on the post-market date is treated as after the close.
  If it actually came out before the open, its front-month IV has already
  collapsed and the term structure filter rejects it.

@@ -13,6 +13,8 @@ import pandas as pd
 import yfinance as yf
 from scipy.interpolate import interp1d
 
+from .market_calendar import eastern_today
+
 # Setup logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -26,7 +28,7 @@ class OptionsAnalyzer:
     
     def filter_dates(self, dates: List[str]) -> List[str]:
         """Filter option expiration dates to those 45+ days out."""
-        today = datetime.today().date()
+        today = eastern_today()
         cutoff_date = today + timedelta(days=45)
         sorted_dates = sorted(datetime.strptime(date, "%Y-%m-%d").date() 
                             for date in dates)
@@ -168,7 +170,7 @@ class OptionsAnalyzer:
                 return {"error": "Could not calculate ATM IVs"}
 
             # Build term structure
-            today = datetime.today().date()
+            today = eastern_today()
             dtes = [(datetime.strptime(exp, "%Y-%m-%d").date() - today).days 
                    for exp in atm_ivs.keys()]
             ivs = list(atm_ivs.values())
