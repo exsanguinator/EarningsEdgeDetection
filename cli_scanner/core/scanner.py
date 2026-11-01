@@ -429,7 +429,7 @@ class EarningsScanner:
                         timing = 'Pre Market'
                     elif hour == 'amc':  # After Market Close
                         timing = 'Post Market'
-                    elif hour in ['dmh', '']:  # During Market Hours or unknown
+                    elif hour == 'dmh':  # During Market Hours
                         timing = 'During Market'
                     else:
                         timing = 'Unknown'
@@ -1273,10 +1273,16 @@ class EarningsScanner:
             
         # Initialize candidates list properly - outside of the try block
         candidates = []
-        # Filter candidates (using list comprehensions for speed)
-        candidates = [s for s in post_stocks if s['timing'] == 'Post Market'] + \
+        # Filter candidates (using list comprehensions for speed).
+        # A report with no timing on the post-market date is assumed to be after
+        # the close: if it was really before the open, the front IV has already
+        # collapsed and the term structure check rejects it.
+        candidates = [s for s in post_stocks if s['timing'] in ('Post Market', 'Unknown')] + \
                      [s for s in pre_stocks if s['timing'] == 'Pre Market']
-        
+        unknown_timing = sorted(s['ticker'] for s in post_stocks if s['timing'] == 'Unknown')
+        if unknown_timing:
+            logger.info(f"Assuming after-close for {len(unknown_timing)} reports with no timing: {unknown_timing}")
+
         logger.info(f"Found {len(candidates)} initial candidates")
         logger.info(f"Candidates = {sorted([t['ticker'] for t in candidates])}")
         
