@@ -24,7 +24,7 @@ The scanner organizes results into three categories:
 
 2. **TIER 2 RECOMMENDED TRADES**
    - Near misses with term structure <= -0.006
-   - Has exactly one near-miss criteria failure
+   - Has one or more near-miss criteria failures (and no outright failures)
    - Term structure <= -0.004 (required for all categories)
 
 3. **NEAR MISSES**
@@ -90,7 +90,7 @@ Optional parameters:
 
 ### Hard Filters (No Exceptions)
 - Stock price >= $10.00
-- Options expiration <= 9 days away
+- Options expiration <= 9 days away (the first expiration on or after the day the market reacts to the report)
 - Open interest >= 2000 contracts (combined calls/puts)
 - Term structure <= -0.004 (for ALL categories, including near misses)
 - ATM option deltas <= 0.57 in absolute value (ensures proper ATM selection)
@@ -129,7 +129,7 @@ Optional parameters:
 When using the `--iron-fly` or `-i` flag, the scanner will calculate recommended iron fly trades for each qualifying stock:
 
 - Selects ATM options closest to 50 delta for short strikes
-- Calculates wing widths based on 3x credit received
+- Calculates wing widths as 1x the credit received (rounded to the nearest listed strikes)
 - Provides detailed analysis including:
   - Short and long strikes for puts and calls
   - Premium received and paid

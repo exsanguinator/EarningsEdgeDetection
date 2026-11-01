@@ -73,7 +73,7 @@ class EarningsScanner:
         - short_call_premium: Premium received for short call
         - short_put_premium: Premium received for short put
         - total_credit: Total credit received for the short strikes
-        - wing_width: The width used for the wings (3x credit)
+        - put_wing_width / call_wing_width: The wing widths (1x credit, snapped to listed strikes)
         """
         try:
             # Get ticker data
@@ -156,7 +156,8 @@ class EarningsScanner:
             total_debit = long_put_premium + long_call_premium
             net_credit = total_credit - total_debit
             max_profit = net_credit
-            max_risk = min(put_wing_width, call_wing_width) - net_credit
+            # Uneven wings: the worst case is on the wider side
+            max_risk = max(put_wing_width, call_wing_width) - net_credit
             
             # Calculate break-even points
             upper_breakeven = short_call_strike + net_credit
@@ -1046,14 +1047,6 @@ class EarningsScanner:
                         logger.warning(f"Fallback expected move calculation also failed for {ticker}: {e2}")
             
             # Non-mandatory checks with near-miss ranges
-            # Price check
-            current_price = yf_ticker.history(period='1d')['Close'].iloc[-1]
-            metrics['price'] = current_price
-            if current_price < 5.0:
-                failed_checks.append(f"Price ${current_price:.2f} < $5.00")
-            elif current_price < 7.0:
-                near_miss_checks.append(f"Price ${current_price:.2f} < $7.00")
-                
             # Volume check
             avg_volume = yf_ticker.history(period='1mo')['Volume'].mean()
                 

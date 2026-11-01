@@ -48,7 +48,7 @@ The codebase has three layers:
 **CLI layer** (`scanner.py`): Parses arguments, formats console output, sends Discord webhooks via `utils/discord_webhook.py`. The `--forever` flag loops indefinitely.
 
 **Scanner layer** (`core/scanner.py`, `EarningsScanner`):
-- `get_scan_dates()`: Time-based logic — before 4 PM ET scans today post-market + tomorrow pre-market; after 4 PM scans tomorrow post-market + day-after pre-market. Handles Friday→Monday weekend skip.
+- `get_scan_dates()`: Time-based logic — before 4 PM ET scans today post-market + tomorrow pre-market; after 4 PM scans tomorrow post-market + day-after pre-market. The pre-market date is the next trading day (`core/market_calendar.py`: weekends and NYSE holidays, Eastern time).
 - `fetch_earnings_data()`: Selects data source based on flags. Default: Investing.com with Finnhub fallback. `-u`: DoltHub + Finnhub. `-c`: all three merged (DoltHub preferred for timing).
 - `validate_stock()`: Ordered filter chain — price → options/expiry → open interest → core analysis → term structure (hard exit at > -0.004) → ATM delta → expected move → volume → Market Chameleon winrate → IV/RV. Returns tier 1/2/near-miss/skip.
 - `adjust_thresholds_based_on_spy()`: Dynamically relaxes IV/RV thresholds when SPY IV/RV is low (four tiers down to 0.75).
