@@ -148,7 +148,8 @@ def main():
 
         if args.iron_fly:
             print("\nIRON FLY STRATEGY:")
-            iron_fly = scanner.calculate_iron_fly_strikes(ticker)
+            iron_fly = scanner.calculate_iron_fly_strikes(
+                ticker, metrics.get("expiration"))
             if 'error' in iron_fly:
                 print(f'  {iron_fly["error"]}')
             else:
@@ -206,7 +207,8 @@ def main():
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
                             print(f'    Market Cap: {m["market_cap"]:,.0f}')
                             if args.iron_fly:
-                                fly = scanner.calculate_iron_fly_strikes(tick)
+                                fly = scanner.calculate_iron_fly_strikes(
+                                    tick, m.get("expiration"))
                                 if 'error' not in fly:
                                     print('    --------------------')
                                     print('    IRON FLY STRATEGY:')
@@ -243,7 +245,8 @@ def main():
                             print(f'    Term Structure: {m["term_structure"]:.3f}')
                             print(f'    Market Cap: {m["market_cap"]:,.0f}')
                             if args.iron_fly:
-                                fly = scanner.calculate_iron_fly_strikes(tick)
+                                fly = scanner.calculate_iron_fly_strikes(
+                                    tick, m.get("expiration"))
                                 if 'error' not in fly:
                                     print('    --------------------')
                                     print('    IRON FLY STRATEGY:')
@@ -305,7 +308,8 @@ def main():
                             f"• Market Cap: {m['market_cap']:,.0f}",
                         ]
                         if args.iron_fly:
-                            fly = scanner.calculate_iron_fly_strikes(tick)
+                            fly = scanner.calculate_iron_fly_strikes(
+                                tick, m.get("expiration"))
                             if 'error' not in fly:
                                 lines += [
                                     "**Iron Fly:**",

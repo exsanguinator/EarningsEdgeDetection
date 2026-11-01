@@ -52,10 +52,19 @@ class EarningsScanner:
                 # Just silently ignore errors during cleanup
                 pass
                 
-    def calculate_iron_fly_strikes(self, ticker: str) -> Dict[str, any]:
+    @staticmethod
+    def first_expiry_on_or_after(options_dates, day) -> Optional[str]:
+        """The first listed expiration (YYYY-MM-DD) on or after day, or None."""
+        day = day.strftime("%Y-%m-%d")
+        return next((d for d in sorted(options_dates) if d >= day), None)
+
+    def calculate_iron_fly_strikes(self, ticker: str, expiry: Optional[str] = None) -> Dict[str, any]:
         """
         Calculate recommended iron fly strikes based on options closest to 50 delta.
-        
+
+        expiry is the expiration to build on (validate_stock stores the one it
+        checked as metrics['expiration']); without it, the first listed one.
+
         Returns a dictionary containing:
         - short_call_strike: Strike price of the short call (near 50 delta)
         - short_put_strike: Strike price of the short put (near 50 delta)
@@ -72,8 +81,10 @@ class EarningsScanner:
             if not ticker_obj.options or len(ticker_obj.options) == 0:
                 return {"error": "No options available"}
             
-            # Get the nearest expiration
-            expiry = ticker_obj.options[0]
+            if expiry is None:
+                expiry = ticker_obj.options[0]
+            elif expiry not in ticker_obj.options:
+                return {"error": f"Expiration {expiry} not listed"}
             
             # Get the options chain
             opt_chain = ticker_obj.option_chain(expiry)
@@ -884,8 +895,17 @@ class EarningsScanner:
                     'metrics': {'price': current_price}
                 }
 
-            # Check expiration date
-            first_expiry = datetime.strptime(options_dates[0], "%Y-%m-%d").date()
+            # Check expiration date: the first expiry that is still open on the reaction day
+            reaction_date = stock.get('reaction_date') or eastern_today()
+            expiry = self.first_expiry_on_or_after(options_dates, reaction_date)
+            if expiry is None:
+                return {
+                    'pass': False,
+                    'near_miss': False,
+                    'reason': f"No expiration on or after {reaction_date}",
+                    'metrics': {'price': current_price}
+                }
+            first_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
             days_to_expiry = (first_expiry - eastern_today()).days
             if days_to_expiry > 9:
                 return {
@@ -896,7 +916,7 @@ class EarningsScanner:
                 }
 
             # Check open interest
-            chain = yf_ticker.option_chain(options_dates[0])
+            chain = yf_ticker.option_chain(expiry)
             total_oi = chain.calls['openInterest'].sum() + chain.puts['openInterest'].sum()
             if total_oi < 2000:
                 return {
@@ -908,7 +928,8 @@ class EarningsScanner:
             
             metrics.update({
                 'open_interest': total_oi,
-                'days_to_expiry': days_to_expiry
+                'days_to_expiry': days_to_expiry,
+                'expiration': expiry
             })
             
             # Mandatory check: core analysis
@@ -995,7 +1016,7 @@ class EarningsScanner:
                     # As a fallback, try to calculate expected move from ATM option premiums
                     try:
                         if 'options_dates' in locals() and len(options_dates) > 0:
-                            chain = yf_ticker.option_chain(options_dates[0])
+                            chain = yf_ticker.option_chain(expiry)
                             calls, puts = chain.calls, chain.puts
                             
                             call_idx = (calls['strike'] - current_price).abs().idxmin()
@@ -1273,8 +1294,12 @@ class EarningsScanner:
         # A report with no timing on the post-market date is assumed to be after
         # the close: if it was really before the open, the front IV has already
         # collapsed and the term structure check rejects it.
-        candidates = [s for s in post_stocks if s['timing'] in ('Post Market', 'Unknown')] + \
-                     [s for s in pre_stocks if s['timing'] == 'Pre Market']
+        # Both groups react on pre_date: the next trading day for after-close
+        # reports, the report day itself for before-open ones.
+        candidates = [{**s, 'reaction_date': pre_date} for s in post_stocks
+                      if s['timing'] in ('Post Market', 'Unknown')] + \
+                     [{**s, 'reaction_date': pre_date} for s in pre_stocks
+                      if s['timing'] == 'Pre Market']
         unknown_timing = sorted(s['ticker'] for s in post_stocks if s['timing'] == 'Unknown')
         if unknown_timing:
             logger.info(f"Assuming after-close for {len(unknown_timing)} reports with no timing: {unknown_timing}")
