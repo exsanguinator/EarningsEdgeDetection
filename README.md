@@ -263,9 +263,11 @@ Common issues:
    - The scanner uses Eastern Time (ET) for market hours
    - Ensure your system clock is accurate
 
-4. Missing delta information:
-   - Some options may not report delta values - the scanner handles this gracefully
-   - When no delta values are available, it falls back to strike-based selection
+4. Delta information:
+   - Yahoo Finance option chains carry implied volatility but no greeks, so the
+     scanner computes delta from each option's IV (Black-Scholes, zero rate)
+   - When an IV is unusable (missing or below 1%), the ATM delta check is skipped
+     and the iron fly falls back to the strike closest to the price
 
 ## Performance Optimizations
 

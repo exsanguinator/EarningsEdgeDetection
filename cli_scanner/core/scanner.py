@@ -23,7 +23,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import yfinance as yf
 from tqdm import tqdm
 
-from .analyzer import OptionsAnalyzer
+from .analyzer import OptionsAnalyzer, chain_deltas
 from .market_calendar import eastern_today, next_trading_day
 import core.yfinance_cookie_patch
 
@@ -94,8 +94,10 @@ class EarningsScanner:
             # Current price
             current_price = ticker_obj.history(period='1d')['Close'].iloc[-1]
             
-            # Check if delta column exists
-            if 'delta' in calls.columns and 'delta' in puts.columns:
+            # yfinance chains have no greeks, so deltas are usually computed from IV
+            calls['delta'] = chain_deltas(calls, current_price, expiry, True)
+            puts['delta'] = chain_deltas(puts, current_price, expiry, False)
+            if calls['delta'].notna().any() and puts['delta'].notna().any():
                 # Find call closest to 50 delta (absolute value)
                 calls['delta_diff'] = abs(abs(calls['delta']) - 0.5)
                 closest_call = calls.loc[calls['delta_diff'].idxmin()]

@@ -4,6 +4,7 @@ Handles volatility calculations and options chain analysis.
 """
 
 import logging
+import math
 import warnings
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
@@ -13,7 +14,38 @@ import pandas as pd
 import yfinance as yf
 from scipy.interpolate import interp1d
 
-from .market_calendar import eastern_today
+from .market_calendar import EASTERN, eastern_today
+
+
+def years_to_expiry(expiry: str) -> float:
+    """Years from now to the 4 pm ET close on the expiration date, at least one hour."""
+    close = EASTERN.localize(datetime.strptime(expiry, "%Y-%m-%d").replace(hour=16))
+    seconds = (close - datetime.now(EASTERN)).total_seconds()
+    return max(seconds, 3600) / (365 * 24 * 3600)
+
+
+def bs_delta(price: float, strike: float, years: float, iv: float, is_call: bool) -> Optional[float]:
+    """Black-Scholes delta with zero rate and dividends, or None for an unusable IV.
+
+    yfinance chains carry impliedVolatility but no greeks. An IV below 1% is
+    treated as missing: yfinance reports near-zero IVs for stale quotes.
+    """
+    if not (iv >= 0.01 and years > 0 and price > 0 and strike > 0):
+        return None
+    d1 = (np.log(price / strike) + 0.5 * iv * iv * years) / (iv * np.sqrt(years))
+    n_d1 = 0.5 * (1 + math.erf(d1 / math.sqrt(2)))
+    return n_d1 if is_call else n_d1 - 1
+
+
+def chain_deltas(options: pd.DataFrame, price: float, expiry: str, is_call: bool) -> pd.Series:
+    """The chain's own delta column if it has one, else deltas computed from impliedVolatility."""
+    if 'delta' in options.columns:
+        return options['delta']
+    years = years_to_expiry(expiry)
+    return pd.Series(
+        [bs_delta(price, k, years, iv, is_call) for k, iv in zip(options['strike'], options['impliedVolatility'])],
+        index=options.index, dtype=float,
+    )
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -160,9 +192,11 @@ class OptionsAnalyzer:
                     put_mid = (puts.loc[put_idx, 'bid'] + puts.loc[put_idx, 'ask']) / 2
                     straddle = call_mid + put_mid
                     
-                    # Get ATM deltas if available
-                    atm_call_delta = calls.loc[call_idx, 'delta'] if 'delta' in calls.columns else None
-                    atm_put_delta = puts.loc[put_idx, 'delta'] if 'delta' in puts.columns else None
+                    # ATM deltas: the chain's own, or computed from its IV
+                    atm_call_delta = chain_deltas(calls.loc[[call_idx]], current_price, exp_date, True).iloc[0]
+                    atm_put_delta = chain_deltas(puts.loc[[put_idx]], current_price, exp_date, False).iloc[0]
+                    if pd.isna(atm_call_delta) or pd.isna(atm_put_delta):
+                        atm_call_delta = atm_put_delta = None
                     
                     first_chain = False
 
