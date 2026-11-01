@@ -23,7 +23,8 @@ from selenium.webdriver.support import expected_conditions as EC
 import yfinance as yf
 from tqdm import tqdm
 
-from .analyzer import OptionsAnalyzer
+from .analyzer import OptionsAnalyzer, chain_deltas
+from .market_calendar import eastern_today, next_trading_day
 import core.yfinance_cookie_patch
 
 logger = logging.getLogger(__name__)
@@ -51,10 +52,19 @@ class EarningsScanner:
                 # Just silently ignore errors during cleanup
                 pass
                 
-    def calculate_iron_fly_strikes(self, ticker: str) -> Dict[str, any]:
+    @staticmethod
+    def first_expiry_on_or_after(options_dates, day) -> Optional[str]:
+        """The first listed expiration (YYYY-MM-DD) on or after day, or None."""
+        day = day.strftime("%Y-%m-%d")
+        return next((d for d in sorted(options_dates) if d >= day), None)
+
+    def calculate_iron_fly_strikes(self, ticker: str, expiry: Optional[str] = None) -> Dict[str, any]:
         """
         Calculate recommended iron fly strikes based on options closest to 50 delta.
-        
+
+        expiry is the expiration to build on (validate_stock stores the one it
+        checked as metrics['expiration']); without it, the first listed one.
+
         Returns a dictionary containing:
         - short_call_strike: Strike price of the short call (near 50 delta)
         - short_put_strike: Strike price of the short put (near 50 delta)
@@ -63,7 +73,7 @@ class EarningsScanner:
         - short_call_premium: Premium received for short call
         - short_put_premium: Premium received for short put
         - total_credit: Total credit received for the short strikes
-        - wing_width: The width used for the wings (3x credit)
+        - put_wing_width / call_wing_width: The wing widths (1x credit, snapped to listed strikes)
         """
         try:
             # Get ticker data
@@ -71,8 +81,10 @@ class EarningsScanner:
             if not ticker_obj.options or len(ticker_obj.options) == 0:
                 return {"error": "No options available"}
             
-            # Get the nearest expiration
-            expiry = ticker_obj.options[0]
+            if expiry is None:
+                expiry = ticker_obj.options[0]
+            elif expiry not in ticker_obj.options:
+                return {"error": f"Expiration {expiry} not listed"}
             
             # Get the options chain
             opt_chain = ticker_obj.option_chain(expiry)
@@ -82,8 +94,10 @@ class EarningsScanner:
             # Current price
             current_price = ticker_obj.history(period='1d')['Close'].iloc[-1]
             
-            # Check if delta column exists
-            if 'delta' in calls.columns and 'delta' in puts.columns:
+            # yfinance chains have no greeks, so deltas are usually computed from IV
+            calls['delta'] = chain_deltas(calls, current_price, expiry, True)
+            puts['delta'] = chain_deltas(puts, current_price, expiry, False)
+            if calls['delta'].notna().any() and puts['delta'].notna().any():
                 # Find call closest to 50 delta (absolute value)
                 calls['delta_diff'] = abs(abs(calls['delta']) - 0.5)
                 closest_call = calls.loc[calls['delta_diff'].idxmin()]
@@ -142,7 +156,8 @@ class EarningsScanner:
             total_debit = long_put_premium + long_call_premium
             net_credit = total_credit - total_debit
             max_profit = net_credit
-            max_risk = min(put_wing_width, call_wing_width) - net_credit
+            # Uneven wings: the worst case is on the wider side
+            max_risk = max(put_wing_width, call_wing_width) - net_credit
             
             # Calculate break-even points
             upper_breakeven = short_call_strike + net_credit
@@ -202,13 +217,8 @@ class EarningsScanner:
             market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
             post_date = now.date() if now < market_close else (now + timedelta(days=1)).date()
 
-        # Determine pre_date
-        if post_date.weekday() == 4:  # Friday (0=Mon, 4=Fri)
-            pre_date = post_date + timedelta(days=3)  # Next Monday
-        elif post_date.weekday() == 5:  # Saturday
-            pre_date = post_date + timedelta(days=2)  # Next Monday
-        else:
-            pre_date = post_date + timedelta(days=1)
+        # Pre-market reports react on the next trading day (skips weekends and NYSE holidays)
+        pre_date = next_trading_day(post_date)
 
         logger.info(f"Computed scan dates: post-market {post_date}, pre-market {pre_date}")
         return post_date, pre_date
@@ -429,7 +439,7 @@ class EarningsScanner:
                         timing = 'Pre Market'
                     elif hour == 'amc':  # After Market Close
                         timing = 'Post Market'
-                    elif hour in ['dmh', '']:  # During Market Hours or unknown
+                    elif hour == 'dmh':  # During Market Hours
                         timing = 'During Market'
                     else:
                         timing = 'Unknown'
@@ -762,8 +772,8 @@ class EarningsScanner:
         if self._driver_lock is None:
             self._driver_lock = threading.Lock()
         
-        # Default return values
-        default_result = {'win_rate': 0.0, 'quarters': 0}
+        # Returned when the fetch fails: None means unavailable, not 0%
+        default_result = {'win_rate': None, 'quarters': 0}
         
         # Acquire lock for thread safety
         with self._driver_lock:
@@ -804,8 +814,8 @@ class EarningsScanner:
                         EC.presence_of_element_located((By.CLASS_NAME, "symbol-section-header-descr"))
                     )
             
-                    # Default results
-                    win_rate = 0.0
+                    # Stays None (unavailable) if the page has no win-rate line
+                    win_rate = None
                     quarters = 0
                     
                     # Extract both the percentage and quarters data
@@ -888,9 +898,18 @@ class EarningsScanner:
                     'metrics': {'price': current_price}
                 }
 
-            # Check expiration date
-            first_expiry = datetime.strptime(options_dates[0], "%Y-%m-%d").date()
-            days_to_expiry = (first_expiry - datetime.now().date()).days
+            # Check expiration date: the first expiry that is still open on the reaction day
+            reaction_date = stock.get('reaction_date') or eastern_today()
+            expiry = self.first_expiry_on_or_after(options_dates, reaction_date)
+            if expiry is None:
+                return {
+                    'pass': False,
+                    'near_miss': False,
+                    'reason': f"No expiration on or after {reaction_date}",
+                    'metrics': {'price': current_price}
+                }
+            first_expiry = datetime.strptime(expiry, "%Y-%m-%d").date()
+            days_to_expiry = (first_expiry - eastern_today()).days
             if days_to_expiry > 9:
                 return {
                     'pass': False,
@@ -900,7 +919,7 @@ class EarningsScanner:
                 }
 
             # Check open interest
-            chain = yf_ticker.option_chain(options_dates[0])
+            chain = yf_ticker.option_chain(expiry)
             total_oi = chain.calls['openInterest'].sum() + chain.puts['openInterest'].sum()
             if total_oi < 2000:
                 return {
@@ -912,7 +931,8 @@ class EarningsScanner:
             
             metrics.update({
                 'open_interest': total_oi,
-                'days_to_expiry': days_to_expiry
+                'days_to_expiry': days_to_expiry,
+                'expiration': expiry
             })
             
             # Mandatory check: core analysis
@@ -999,7 +1019,7 @@ class EarningsScanner:
                     # As a fallback, try to calculate expected move from ATM option premiums
                     try:
                         if 'options_dates' in locals() and len(options_dates) > 0:
-                            chain = yf_ticker.option_chain(options_dates[0])
+                            chain = yf_ticker.option_chain(expiry)
                             calls, puts = chain.calls, chain.puts
                             
                             call_idx = (calls['strike'] - current_price).abs().idxmin()
@@ -1027,14 +1047,6 @@ class EarningsScanner:
                         logger.warning(f"Fallback expected move calculation also failed for {ticker}: {e2}")
             
             # Non-mandatory checks with near-miss ranges
-            # Price check
-            current_price = yf_ticker.history(period='1d')['Close'].iloc[-1]
-            metrics['price'] = current_price
-            if current_price < 5.0:
-                failed_checks.append(f"Price ${current_price:.2f} < $5.00")
-            elif current_price < 7.0:
-                near_miss_checks.append(f"Price ${current_price:.2f} < $7.00")
-                
             # Volume check
             avg_volume = yf_ticker.history(period='1mo')['Volume'].mean()
                 
@@ -1054,15 +1066,19 @@ class EarningsScanner:
                 metrics['win_rate'] = win_rate
                 metrics['win_quarters'] = quarters
                 
+                # A fetch that failed is reported as such rather than scored as 0%.
+                # It still counts as a failed check.
+                if win_rate is None:
+                    failed_checks.append("Winrate unavailable")
                 # Apply the new threshold of 50%
-                if win_rate < 50.0:
+                elif win_rate < 50.0:
                     if win_rate >= 40.0:  # Between 40-50% is now a near miss
                         near_miss_checks.append(f"Winrate {win_rate}% < 50% (over {quarters} earnings)")
                     else:  # Below 40% is still a failure
                         failed_checks.append(f"Winrate {win_rate}% < 40% (over {quarters} earnings)")
             else:
-                # Add placeholders if we skip
-                metrics['win_rate'] = 0.0
+                # Not checked
+                metrics['win_rate'] = None
                 metrics['win_quarters'] = 0
             
             # IV/RV check
@@ -1273,10 +1289,20 @@ class EarningsScanner:
             
         # Initialize candidates list properly - outside of the try block
         candidates = []
-        # Filter candidates (using list comprehensions for speed)
-        candidates = [s for s in post_stocks if s['timing'] == 'Post Market'] + \
-                     [s for s in pre_stocks if s['timing'] == 'Pre Market']
-        
+        # Filter candidates (using list comprehensions for speed).
+        # A report with no timing on the post-market date is assumed to be after
+        # the close: if it was really before the open, the front IV has already
+        # collapsed and the term structure check rejects it.
+        # Both groups react on pre_date: the next trading day for after-close
+        # reports, the report day itself for before-open ones.
+        candidates = [{**s, 'reaction_date': pre_date} for s in post_stocks
+                      if s['timing'] in ('Post Market', 'Unknown')] + \
+                     [{**s, 'reaction_date': pre_date} for s in pre_stocks
+                      if s['timing'] == 'Pre Market']
+        unknown_timing = sorted(s['ticker'] for s in post_stocks if s['timing'] == 'Unknown')
+        if unknown_timing:
+            logger.info(f"Assuming after-close for {len(unknown_timing)} reports with no timing: {unknown_timing}")
+
         logger.info(f"Found {len(candidates)} initial candidates")
         logger.info(f"Candidates = {sorted([t['ticker'] for t in candidates])}")
         
