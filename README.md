@@ -24,7 +24,7 @@ The scanner organizes results into three categories:
 
 2. **TIER 2 RECOMMENDED TRADES**
    - Near misses with term structure <= -0.006
-   - Has exactly one near-miss criteria failure
+   - Has one or more near-miss criteria failures (and no outright failures)
    - Term structure <= -0.004 (required for all categories)
 
 3. **NEAR MISSES**
@@ -90,7 +90,7 @@ Optional parameters:
 
 ### Hard Filters (No Exceptions)
 - Stock price >= $10.00
-- Options expiration <= 9 days away
+- Options expiration <= 9 days away (the first expiration on or after the day the market reacts to the report)
 - Open interest >= 2000 contracts (combined calls/puts)
 - Term structure <= -0.004 (for ALL categories, including near misses)
 - ATM option deltas <= 0.57 in absolute value (ensures proper ATM selection)
@@ -116,7 +116,8 @@ Optional parameters:
 3. Winrate (previously Market Chameleon Overestimate)
    - Pass: >= 50%
    - Near Miss: 40-49.9%
-   - Fail: < 40%
+   - Fail: < 40%, or "unavailable" when the win-rate fetch fails (the scan
+     summary lists the names this happened to)
 
 4. IV/RV Ratio
    - Pass: ≥ 1.25
@@ -128,7 +129,7 @@ Optional parameters:
 When using the `--iron-fly` or `-i` flag, the scanner will calculate recommended iron fly trades for each qualifying stock:
 
 - Selects ATM options closest to 50 delta for short strikes
-- Calculates wing widths based on 3x credit received
+- Calculates wing widths as 1x the credit received (rounded to the nearest listed strikes)
 - Provides detailed analysis including:
   - Short and long strikes for puts and calls
   - Premium received and paid
@@ -157,6 +158,14 @@ With the `--iron-fly` flag, additional trade specifics are provided.
  If run after 4 PM Eastern:
   - Checks tomorrow's post-market earnings
   - Checks the following day's pre-market earnings
+
+ "Following day" means the next trading day, skipping weekends and NYSE holidays.
+ All dates, including days to expiry, use Eastern time whatever the machine's
+ timezone.
+
+ A report with no timing on the post-market date is treated as after the close.
+ If it actually came out before the open, its front-month IV has already
+ collapsed and the term structure filter rejects it.
  
 ## Data Source Integrations
 
@@ -255,9 +264,11 @@ Common issues:
    - The scanner uses Eastern Time (ET) for market hours
    - Ensure your system clock is accurate
 
-4. Missing delta information:
-   - Some options may not report delta values - the scanner handles this gracefully
-   - When no delta values are available, it falls back to strike-based selection
+4. Delta information:
+   - Yahoo Finance option chains carry implied volatility but no greeks, so the
+     scanner computes delta from each option's IV (Black-Scholes, zero rate)
+   - When an IV is unusable (missing or below 1%), the ATM delta check is skipped
+     and the iron fly falls back to the strike closest to the price
 
 ## Performance Optimizations
 
