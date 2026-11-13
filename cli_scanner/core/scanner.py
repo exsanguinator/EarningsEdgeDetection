@@ -41,6 +41,13 @@ logger.addHandler(handler)
 core.yfinance_cookie_patch.patch_yfdata_cookie_basic()
 session = curl_requests.Session(impersonate="chrome")
 
+# How much a source's timing tells us, for merging: a known time beats a DoltHub
+# NULL ('Unknown', a report on that date with no time), which beats a row with
+# no time from Investing.com/Finnhub ('Unconfirmed', usually an estimated date).
+def timing_rank(timing: Optional[str]) -> int:
+    return {'Unconfirmed': 0, 'Unknown': 1}.get(timing, 2)
+
+
 class EarningsScanner:
     # Initialize class variables, only one __init__ method should exist
     def __del__(self):
@@ -238,8 +245,8 @@ class EarningsScanner:
         try:
             import mysql.connector
             from mysql.connector import errorcode
-        except ImportError:
-            logger.warning("mysql-connector-python not installed. Run 'pip install mysql-connector-python' to use DoltHub data.")
+        except Exception as e:  # ImportError, or an old connector broken on newer Python (ssl.PROTOCOL_TLSv1)
+            logger.warning(f"mysql-connector-python unavailable ({e}). Run 'pip install -U mysql-connector-python' to use DoltHub data.")
             logger.info("Falling back to other sources due to missing mysql-connector")
             return []
         
@@ -442,7 +449,9 @@ class EarningsScanner:
                     elif hour == 'dmh':  # During Market Hours
                         timing = 'During Market'
                     else:
-                        timing = 'Unknown'
+                        # Finnhub leaves 'hour' empty on projected dates; almost none
+                        # of those rows ever get an epsActual on that day.
+                        timing = 'Unconfirmed'
                     
                     stocks.append({'ticker': ticker, 'timing': timing})
                 except Exception as e:
@@ -510,8 +519,8 @@ class EarningsScanner:
             ticker = stock['ticker']
             if ticker not in all_stocks:
                 all_stocks[ticker] = stock
-            # Keep DoltHub timing if it exists, but if DoltHub was Unknown and Finnhub has a value, use Finnhub's
-            elif all_stocks[ticker].get('timing') == 'Unknown' and stock.get('timing') != 'Unknown':
+            # Keep DoltHub timing unless Finnhub's says more (see timing_rank)
+            elif timing_rank(stock.get('timing')) > timing_rank(all_stocks[ticker].get('timing')):
                 all_stocks[ticker]['timing'] = stock.get('timing')
         
         # Finally Investing.com stocks
@@ -519,8 +528,8 @@ class EarningsScanner:
             ticker = stock['ticker']
             if ticker not in all_stocks:
                 all_stocks[ticker] = stock
-            # Only override timing if current is Unknown and new one isn't
-            elif all_stocks[ticker].get('timing') == 'Unknown' and stock.get('timing') != 'Unknown':
+            # Only override timing with one that says more (see timing_rank)
+            elif timing_rank(stock.get('timing')) > timing_rank(all_stocks[ticker].get('timing')):
                 all_stocks[ticker]['timing'] = stock.get('timing')
                 
         # Convert back to a list
@@ -571,8 +580,8 @@ class EarningsScanner:
                 ticker = stock['ticker']
                 if ticker not in all_stocks:
                     all_stocks[ticker] = stock
-                # If both have timing info, prefer non-Unknown timing
-                elif all_stocks[ticker].get('timing') == 'Unknown' and stock.get('timing') != 'Unknown':
+                # Prefer the timing that says more (see timing_rank)
+                elif timing_rank(stock.get('timing')) > timing_rank(all_stocks[ticker].get('timing')):
                     all_stocks[ticker]['timing'] = stock.get('timing')
             
             merged_stocks = list(all_stocks.values())
@@ -662,7 +671,9 @@ class EarningsScanner:
                     else:
                         timing = 'During Market'
                 else:
-                    timing = 'Unknown'
+                    # No time on Investing.com marks an estimated date (dead tickers,
+                    # names that already reported), not a confirmed report.
+                    timing = 'Unconfirmed'
                 
                 stocks.append({'ticker': ticker, 'timing': timing})
                 
@@ -1154,9 +1165,14 @@ class EarningsScanner:
             if 'error' not in spy_analysis:
                 spy_iv_rv = spy_analysis.get('iv30_rv30', 0)
                 logger.info(f"Current SPY IV/RV ratio: {spy_iv_rv:.2f}")
-                
+
                 # Three-tiered threshold system based on market conditions
-                if spy_iv_rv <= 0.75:  # Severe low volatility (new tier)
+                if spy_iv_rv < 0.3:
+                    # SPY's IV/RV doesn't go this low; yfinance reports near-zero IVs
+                    # for stale quotes (zero bid/ask), so don't relax on bad data.
+                    logger.warning(f"SPY IV/RV {spy_iv_rv:.2f} is implausible (stale option quotes?). "
+                                   f"Option data for this run may be unreliable; using standard thresholds")
+                elif spy_iv_rv <= 0.75:  # Severe low volatility (new tier)
                     self.iv_rv_pass_threshold = 0.90  # Relaxed by 0.35
                     self.iv_rv_near_miss_threshold = 0.65  # Relaxed by 0.35
                     logger.info(f"Market IV/RV is severely low ({spy_iv_rv:.2f}). Relaxing IV/RV thresholds by 0.35")
@@ -1290,9 +1306,11 @@ class EarningsScanner:
         # Initialize candidates list properly - outside of the try block
         candidates = []
         # Filter candidates (using list comprehensions for speed).
-        # A report with no timing on the post-market date is assumed to be after
-        # the close: if it was really before the open, the front IV has already
-        # collapsed and the term structure check rejects it.
+        # A DoltHub report with no timing ('Unknown') on the post-market date is
+        # assumed to be after the close: if it was really before the open, the
+        # front IV has already collapsed and the term structure check rejects it.
+        # 'Unconfirmed' rows (no time on Investing.com/Finnhub) are estimated
+        # dates, mostly not real reports, so they are dropped.
         # Both groups react on pre_date: the next trading day for after-close
         # reports, the report day itself for before-open ones.
         candidates = [{**s, 'reaction_date': pre_date} for s in post_stocks
@@ -1302,6 +1320,10 @@ class EarningsScanner:
         unknown_timing = sorted(s['ticker'] for s in post_stocks if s['timing'] == 'Unknown')
         if unknown_timing:
             logger.info(f"Assuming after-close for {len(unknown_timing)} reports with no timing: {unknown_timing}")
+        unconfirmed = sorted(s['ticker'] for s in post_stocks + pre_stocks if s['timing'] == 'Unconfirmed')
+        if unconfirmed:
+            logger.info(f"Skipping {len(unconfirmed)} unconfirmed earnings dates (no report time given)")
+            logger.debug(f"Unconfirmed: {unconfirmed}")
 
         logger.info(f"Found {len(candidates)} initial candidates")
         logger.info(f"Candidates = {sorted([t['ticker'] for t in candidates])}")
