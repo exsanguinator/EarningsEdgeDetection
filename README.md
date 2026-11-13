@@ -163,9 +163,13 @@ With the `--iron-fly` flag, additional trade specifics are provided.
  All dates, including days to expiry, use Eastern time whatever the machine's
  timezone.
 
- A report with no timing on the post-market date is treated as after the close.
+ A DoltHub report with no timing on the post-market date is treated as after the close.
  If it actually came out before the open, its front-month IV has already
  collapsed and the term structure filter rejects it.
+
+ Investing.com and Finnhub rows with no report time are skipped: those are
+ estimated dates (defunct tickers, names that already reported), and almost none
+ of them turn out to be real reports on that day.
  
 ## Data Source Integrations
 
